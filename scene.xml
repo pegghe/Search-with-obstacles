@@ -1,0 +1,54 @@
+<mujoco model="raycast1">
+  <compiler angle="degree"/>
+  <option timestep="0.005" integrator="implicitfast"/>
+
+  <visual>
+    <global offwidth="900" offheight="900"/>
+    <headlight ambient="0.5 0.5 0.5" diffuse="0.6 0.6 0.6"/>
+  </visual>
+
+  <worldbody>
+    <light pos="0 0 5" dir="0 0 -1"/>
+    <camera name="top" pos="0 0 9" xyaxes="1 0 0 0 1 0" fovy="45"/>
+
+    <!-- Arena: 6 x 6 meters inside the walls. Box sizes are half-extents. -->
+    <geom name="floor" type="plane" size="3.2 3.2 0.1" rgba="0.88 0.90 0.93 1"/>
+    <geom name="wall_north" type="box" pos="0 3.05 0.2" size="3.1 0.05 0.2" rgba="0.35 0.38 0.43 1"/>
+    <geom name="wall_south" type="box" pos="0 -3.05 0.2" size="3.1 0.05 0.2" rgba="0.35 0.38 0.43 1"/>
+    <geom name="wall_east" type="box" pos="3.05 0 0.2" size="0.05 3.1 0.2" rgba="0.35 0.38 0.43 1"/>
+    <geom name="wall_west" type="box" pos="-3.05 0 0.2" size="0.05 3.1 0.2" rgba="0.35 0.38 0.43 1"/>
+
+    <!-- The robot faces local +X, toward the obstacle and target. -->
+    <!-- Two slides followed by yaw allow planar motion without tipping. -->
+    <body name="robot" pos="-2 0 0.12">
+      <joint name="robot_x" type="slide" axis="1 0 0" damping="0.5"/>
+      <joint name="robot_y" type="slide" axis="0 1 0" damping="0.5"/>
+      <joint name="robot_yaw" type="hinge" axis="0 0 1" damping="0.1"/>
+      <geom name="robot_base" type="box" size="0.25 0.25 0.12" mass="1" rgba="0.12 0.40 0.85 1"/>
+      <!-- A vertical cylinder looks circular from above. -->
+      <body name="head" pos="0.28 0 0">
+        <geom name="robot_head" type="cylinder" size="0.14 0.12" mass="0.2" rgba="0.15 0.75 0.95 1"/>
+        <!-- Future ray origin, just beyond the front surface of the head. -->
+        <body name="robot_indicator" pos="0.15 0 0">
+          <site name="sensor_origin" type="sphere" size="0.025" rgba="1 1 1 1"/>
+        </body>
+      </body>
+    </body>
+
+    <!-- Two fixed obstacles matching search_with_obstacles. -->
+    <geom name="obstacle_1" type="box" pos="0 -1.4 0.25" size="0.30 0.45 0.25" rgba="0.90 0.30 0.15 1"/>
+    <geom name="obstacle_2" type="box" pos="0 1.4 0.25" size="0.30 0.45 0.25" rgba="0.90 0.30 0.15 1"/>
+
+    <!-- Visible to horizontal rays, but does not generate physical contacts. -->
+    <geom name="target" type="cylinder" pos="2 0 0.12" size="0.22 0.12"
+          contype="0" conaffinity="0" rgba="0.15 0.80 0.30 0.5"/>
+  </worldbody>
+
+  <!-- Velocity servos apply bounded forces; contacts can block the robot. -->
+  <!-- The controller converts one forward command into world X/Y setpoints. -->
+  <actuator>
+    <velocity name="drive_x" joint="robot_x" kv="20" ctrlrange="-0.6 0.6" forcerange="-20 20"/>
+    <velocity name="drive_y" joint="robot_y" kv="20" ctrlrange="-0.6 0.6" forcerange="-20 20"/>
+    <velocity name="turn" joint="robot_yaw" kv="5" ctrlrange="-1.2 1.2" forcerange="-5 5"/>
+  </actuator>
+</mujoco>
