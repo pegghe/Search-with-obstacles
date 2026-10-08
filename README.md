@@ -1,18 +1,18 @@
 # raycast1
 
-## Random obstacle dimensions
+## Random obstacle positions and dimensions
 
-Training, evaluation and `watch_agent.py` keep the two obstacle centers fixed
-at `(0, -1.4)` and `(0, 1.4)`, but independently randomize their width
+Training, evaluation and `watch_agent.py` randomize both obstacle positions
+and their width
 (0.40–1.20 m) and depth (0.60–1.20 m) at every reset. Height stays 0.50 m.
-Even at maximum size, the passages to the north/south walls are at least 1 m
-wide and the gap between obstacles is at least 1.60 m. The robot, including
+Every obstacle stays at least 1 m from all arena walls, and the shortest gap
+between obstacle surfaces is at least 1 m. The robot, including
 its head, fits inside a circle of diameter 0.84 m, leaving clearance to pass
 and turn. Robot and target spawns use the sampled obstacle sizes.
-The same reset seed reproduces sizes and spawns. `view_scene.py` shows the
-static XML dimensions; the environment viewers show the random dimensions.
+The same reset seed reproduces sizes and positions. `view_scene.py` shows the
+static XML scene; the environment viewers show the random scene.
 Older checkpoints can still be loaded, but their previous evaluation results
-refer to fixed obstacle sizes and must be measured again on this environment.
+refer to earlier scene distributions and must be measured again on this environment.
 
 A small MuJoCo project with a Gymnasium-controlled robot and a raycasting module
 based on the code provided by the professor. Reinforcement learning will be
@@ -223,7 +223,7 @@ a new output directory for each run. Omit `--render` for faster headless trainin
 
 Each new output directory contains:
 
-- `best_model.zip`: highest evaluation reward seen during training.
+- `best_model.zip`: highest evaluation success rate seen during training, including the final policy.
 - `final_model.zip`: policy after the final training update.
 - `train.monitor.csv`: training episode returns and lengths.
 - `evaluations.npz`: periodic evaluation rewards, lengths, and success flags.
@@ -232,8 +232,11 @@ Each new output directory contains:
 Output directories must be new to protect previous runs. If `--output` is omitted,
 training creates a timestamped directory in `runs`. PPO collects 2048-step rollouts,
 so the actual step count can slightly exceed `--steps`. Evaluation runs every
-10000 actions (or sooner for a short run). Best means highest reward, not guaranteed
-success. Evaluation averages 10 episodes with random spawns and deterministic actions.
+10000 actions (or sooner for a short run). Best means highest success rate;
+ties keep the earlier checkpoint. Evaluation uses 10 episodes with random
+spawns and deterministic actions, so success rates vary in increments of 10%.
+Reward is still logged but does not select the checkpoint. Existing saved
+checkpoints are unchanged; this criterion applies to new training runs.
 
 Evaluate a saved agent without opening a window, using the same command style as
 the other projects:

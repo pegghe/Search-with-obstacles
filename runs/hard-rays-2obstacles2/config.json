@@ -1,0 +1,10 @@
+{
+  "requested_steps": 500000,
+  "seed": 42,
+  "algorithm": "PPO",
+  "scene": "random robot and target positions",
+  "stage": "hard",
+  "gamma": 0.999,
+  "best_model_metric": "success_rate",
+  "resume": "/home/rl/raycast_update_copy/runs/hard-rays-2obstacles1/best_model.zip"
+}

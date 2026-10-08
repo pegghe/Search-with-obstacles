@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import time
 
+import numpy as np
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
@@ -12,6 +13,38 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.evaluation import evaluate_policy
 
 from raycast_env import RaycastEnv
+
+
+class SuccessEvalCallback(EvalCallback):
+    """Save the highest success rate; keep the earlier checkpoint on ties."""
+
+    def __init__(self, eval_env, output, **kwargs):
+        # Disable EvalCallback's reward-based checkpoint saving.
+        super().__init__(eval_env, best_model_save_path=None, **kwargs)
+        self.output = Path(output)
+        self.best_success_rate = -1.0
+
+    def save_if_best(self):
+        if len(self._is_success_buffer) != self.n_eval_episodes:
+            raise RuntimeError('Evaluation must report is_success for every episode')
+        success_rate = float(np.mean(self._is_success_buffer))
+        if success_rate > self.best_success_rate:
+            self.model.save(self.output / 'best_model')
+            self.best_success_rate = success_rate
+            print(f'New best success rate: {success_rate:.1%}')
+
+    def _on_step(self):
+        continue_training = super()._on_step()
+        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+            self.save_if_best()
+        return continue_training
+
+    def evaluate_final(self):
+        self._is_success_buffer = []
+        evaluate_policy(self.model, self.eval_env, n_eval_episodes=self.n_eval_episodes,
+                        deterministic=self.deterministic, callback=self._log_success_callback)
+        print(f'Final policy success rate: {np.mean(self._is_success_buffer):.1%}')
+        self.save_if_best()
 
 
 class TrainingViewer(BaseCallback):
@@ -90,7 +123,7 @@ def main():
     try:
         # Evaluation uses a separate simulator and deterministic actions.
         # Average evaluation across multiple random spawn pairs.
-        callback = EvalCallback(evaluation, best_model_save_path=str(output),
+        callback = SuccessEvalCallback(evaluation, output=output,
                                 log_path=str(output), eval_freq=min(10_000, max(2048, args.steps)),
                                 n_eval_episodes=10, deterministic=True)
         if args.resume:
@@ -102,7 +135,7 @@ def main():
             model = PPO.load(args.resume, env=env, device='cpu', seed=args.seed, **overrides)
         else:
             model = PPO('MlpPolicy', env, seed=args.seed, device='cpu', verbose=1, tensorboard_log="./tensorboard_logs/",
-                        n_steps=2048, batch_size=64, learning_rate=3e-4,
+                        n_steps=2048, batch_size=64, learning_rate=1e-4,
                         gamma=0.999 if args.gamma is None else args.gamma, ent_coef=0.01)
         print(f'Training stage={args.stage}, gamma={model.gamma}')
         # Custom model metadata travels with both best and final checkpoints.
@@ -112,6 +145,7 @@ def main():
             'algorithm': 'PPO', 'scene': 'random robot and target positions',
             'stage': args.stage,
             'gamma': model.gamma,
+            'best_model_metric': 'success_rate',
             'resume': str(args.resume.resolve()) if args.resume else None,
         }, indent=2) + '\n')
         # PPO collects complete rollouts, so actual steps may exceed the request.
@@ -122,11 +156,7 @@ def main():
         # Periodic callbacks run during rollout collection, before PPO updates
         # the network. Evaluate once more after the final update so a better
         # final policy is not missing from best_model.zip.
-        final_reward, _ = evaluate_policy(model, evaluation, n_eval_episodes=10,
-                                          deterministic=True)
-        if final_reward > callback.best_mean_reward:
-            model.save(output / 'best_model')
-            print(f'Final policy is the new best: reward={final_reward:.2f}')
+        callback.evaluate_final()
         print(f'Models and logs saved in: {output.resolve()}')
     finally:
         if training_viewer is not None:

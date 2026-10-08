@@ -12,6 +12,7 @@ class EnvironmentTests(unittest.TestCase):
     def setUp(self):
         self.env = RaycastEnv()
         self.env.reset(seed=42)
+        self.env.model.geom_pos[self.env.blocks, :2] = [(0, -1.4), (0, 1.4)]
         self.addCleanup(self.env.close)
 
     def pose(self, x, y, yaw=0):
@@ -50,22 +51,29 @@ class EnvironmentTests(unittest.TestCase):
                 env.close()
 
     def test_random_obstacle_sizes_and_passages(self):
-        centers = self.env.model.geom_pos[self.env.blocks].copy()
         samples = []
+        positions = []
         for seed in range(50):
             self.env.reset(seed=seed)
             sizes = self.env.model.geom_size[self.env.blocks].copy()
+            centers = self.env.model.geom_pos[self.env.blocks].copy()
+            positions.append(centers[:, :2])
             samples.append(sizes[:, :2])
-            np.testing.assert_array_equal(self.env.model.geom_pos[self.env.blocks], centers)
+            self.assertTrue(np.all(3 - np.abs(centers[:, :2]) - sizes[:, :2] >= 1 - 1e-12))
+            gap = np.maximum(np.abs(centers[0, :2] - centers[1, :2]) - sizes[0, :2] - sizes[1, :2], 0)
+            self.assertGreaterEqual(np.linalg.norm(gap), 1)
             self.assertTrue(np.all(sizes[:, :2] >= self.env.OBSTACLE_SIZE_MIN))
             self.assertTrue(np.all(sizes[:, :2] <= self.env.OBSTACLE_SIZE_MAX))
             np.testing.assert_array_equal(sizes[:, 2], [0.25, 0.25])
             self.env.reset(seed=seed)
             np.testing.assert_array_equal(sizes, self.env.model.geom_size[self.env.blocks])
+            np.testing.assert_array_equal(centers, self.env.model.geom_pos[self.env.blocks])
         self.assertEqual(len(np.unique(np.array(samples).reshape(50, -1), axis=0)), 50)
+        self.assertEqual(len(np.unique(np.array(positions).reshape(50, -1), axis=0)), 50)
         # At maximum size, traverse all three horizontal passages, turning at
         # each sampled position. This checks the entire robot, including head.
         self.env.model.geom_size[self.env.blocks, :2] = self.env.OBSTACLE_SIZE_MAX
+        self.env.model.geom_pos[self.env.blocks, :2] = [(0, -1.4), (0, 1.4)]
         for y in (-2.5, 0, 2.5):
             for x in np.linspace(-2.5, 2.5, 21):
                 for yaw in np.linspace(-np.pi, np.pi, 17):
@@ -77,6 +85,14 @@ class EnvironmentTests(unittest.TestCase):
         rays = self.env._get_observation().reshape(9, 3)
         self.assertAlmostEqual(float(rays[4, 0]), (2 - 0.43 - 0.60) / 6, places=5)
         self.pose(-0.99, -1.4)
+        self.assertTrue(self.env._has_collision())
+        # Move the obstacle well outside its original XML position: ray and
+        # contact broad-phase bounds must still include it.
+        self.env.model.geom_pos[self.env.blocks[0], :2] = [1.2, 0]
+        self.pose(-1.5, 0)
+        rays = self.env._get_observation().reshape(9, 3)
+        self.assertAlmostEqual(float(rays[4, 0]), (2.7 - 0.43 - 0.60) / 6, places=5)
+        self.pose(0.81, 0)
         self.assertTrue(self.env._has_collision())
 
     def test_ray_object_types_and_visibility(self):
@@ -123,6 +139,7 @@ class EnvironmentTests(unittest.TestCase):
         check_env(self.env, skip_render_check=True)
 
     def fixed_scene(self):
+        self.env.model.geom_pos[self.env.blocks, :2] = [(0, -1.4), (0, 1.4)]
         self.env.model.geom_pos[self.env.target_id, :2] = [2, -1.4]
         self.pose(-2, -1.4)
 
@@ -170,6 +187,7 @@ class EnvironmentTests(unittest.TestCase):
         for x, y in [(None, -1.4), (-2, 2.76)]:
             with self.subTest(x=x, y=y):
                 self.env.reset()
+                self.env.model.geom_pos[self.env.blocks, :2] = [(0, -1.4), (0, 1.4)]
                 if x is None:
                     x = -self.env.model.geom_size[self.env.blocks[0], 0] - 0.40
                 self.pose(x, y)
