@@ -135,7 +135,7 @@ def main():
             model = PPO.load(args.resume, env=env, device='cpu', seed=args.seed, **overrides)
         else:
             model = PPO('MlpPolicy', env, seed=args.seed, device='cpu', verbose=1, tensorboard_log="./tensorboard_logs/",
-                        n_steps=2048, batch_size=64, learning_rate=1e-4,
+                        n_steps=2048, batch_size=64, learning_rate=3e-4,
                         gamma=0.999 if args.gamma is None else args.gamma, ent_coef=0.01)
         print(f'Training stage={args.stage}, gamma={model.gamma}')
         # Custom model metadata travels with both best and final checkpoints.
