@@ -1,0 +1,14 @@
+{
+  "requested_steps": 1000000,
+  "seed": 42,
+  "algorithm": "PPO",
+  "scene": "random robot and target positions",
+  "stage": "hard",
+  "gamma": 0.999,
+  "n_envs": 4,
+  "vec_env": "subproc",
+  "n_steps_per_env": 2048,
+  "rollout_size": 8192,
+  "best_model_metric": "mean_reward",
+  "resume": null
+}

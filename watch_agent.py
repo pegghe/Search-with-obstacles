@@ -7,6 +7,7 @@ import time
 import mujoco
 import torch
 from stable_baselines3 import PPO
+from stable_baselines3.common.utils import check_for_correct_spaces
 
 from raycast_env import RaycastEnv
 
@@ -28,8 +29,8 @@ def main():
     print(f'Evaluation stage: {stage}')
     env = RaycastEnv(stage=stage)
     try:
-        # Supplying env also checks saved observation/action space compatibility.
-        agent.set_env(env)
+        # Prediction works with one simulator even when training used several.
+        check_for_correct_spaces(env, agent.observation_space, agent.action_space)
         env.reset()
         if args.headless:
             context = nullcontext(None)

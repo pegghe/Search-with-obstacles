@@ -223,19 +223,19 @@ a new output directory for each run. Omit `--render` for faster headless trainin
 
 Each new output directory contains:
 
-- `best_model.zip`: highest evaluation success rate seen during training, including the final policy.
+- `best_model.zip`: highest rolling mean reward over completed training episodes.
 - `final_model.zip`: policy after the final training update.
-- `train.monitor.csv`: training episode returns and lengths.
+- `0.monitor.csv`, `1.monitor.csv`, …: episode returns and lengths for each training environment.
 - `evaluations.npz`: periodic evaluation rewards, lengths, and success flags.
 - `config.json`: requested step count and seed.
 
 Output directories must be new to protect previous runs. If `--output` is omitted,
 training creates a timestamped directory in `runs`. PPO collects 2048-step rollouts,
 so the actual step count can slightly exceed `--steps`. Evaluation runs every
-10000 actions (or sooner for a short run). Best means highest success rate;
+10000 actions (or sooner for a short run). Best means highest rolling mean training episode reward;
 ties keep the earlier checkpoint. Evaluation uses 10 episodes with random
 spawns and deterministic actions, so success rates vary in increments of 10%.
-Reward is still logged but does not select the checkpoint. Existing saved
+Evaluation metrics are diagnostic and do not select the checkpoint. Existing saved
 checkpoints are unchanged; this criterion applies to new training runs.
 
 Evaluate a saved agent without opening a window, using the same command style as
@@ -336,3 +336,34 @@ effective value is printed at startup and recorded in `config.json`:
 ```bash
 python train.py --stage intermediate1 --resume runs/curriculum-medium/best_model.zip --gamma 0.999 --steps 150000 --output runs/intermediate1-gamma0999-new
 ```
+
+## Vectorized training
+
+`Train` uses 4 independent simulators by default, with `SubprocVecEnv`
+running each in a separate process. All simulators feed the same PPO policy.
+
+```bash
+python train.py --n-envs 4 --vec-env subproc --steps 300000
+python train.py --n-envs 4 --vec-env dummy --render --steps 300000
+```
+
+`DummyVecEnv` runs the environments sequentially in the parent process;
+`--render` displays its first simulator. Seeds differ across environments.
+`--steps` counts total transitions across all environments. PPO collects
+2048 transitions per environment before an update (8192 with 4 environments),
+so a run can exceed its requested budget to complete a rollout. Resuming
+preserves the checkpoint's `n_steps`. Evaluation uses a separate single
+vectorized environment and approximately every 10000 training transitions.
+The best checkpoint is selected at rollout end, before the PPO update, by
+mean return over the last 100 completed training episodes (`--best-window`).
+A full window is required; shorter runs may only produce `final_model.zip`.
+The window may span several policy updates. Evaluation uses stochastic scene
+samples and deterministic actions for diagnostics only. No final evaluation
+selects a checkpoint. `best_model_metrics.json` records the selected score and step. Configuration records the backend and rollout size.
+
+Reference: [SB3 vectorized environments](https://stable-baselines3.readthedocs.io/en/master/guide/vec_envs.html).
+
+Best-model selection uses stochastic training actions and includes successes,
+collisions, and timeouts. TensorBoard logs `rollout/best_selection_mean_reward`,
+`rollout/best_selection_episodes`, and `rollout/best_checkpoint_mean_reward`.
+Each resumed session starts a fresh selection window and record.

@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from stable_baselines3 import PPO
+from stable_baselines3.common.utils import check_for_correct_spaces
 
 from raycast_env import RaycastEnv
 
@@ -53,7 +54,8 @@ def main():
     stage = args.stage or getattr(model, "curriculum_stage", "hard")
     env = RaycastEnv(stage=stage)
     try:
-        model.set_env(env)
+        # Prediction works with one simulator even when training used several.
+        check_for_correct_spaces(env, model.observation_space, model.action_space)
         print(f"Evaluation stage: {stage}; episodes: {args.episodes}; seed: {args.seed}")
         print("PPO agent:    ", evaluate(env, model, args.episodes, args.seed))
     finally:
