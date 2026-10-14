@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-import gymnasium as gym
 from gymnasium import spaces
+from gymnasium.envs.mujoco import MujocoEnv
 import mujoco
 import numpy as np
 
@@ -11,38 +11,46 @@ from movement import RobotController
 from raycast import Raycaster
 
 
-class RaycastEnv(gym.Env):
+class RaycastEnv(MujocoEnv):
     """Reach the target without touching obstacles; runs without a viewer."""
 
-    metadata = {"render_modes": []}
+    metadata = {"render_modes": ["human", "rgb_array", "depth_array"], "render_fps": 50}
     STAGES = {"hard": 0.0}
     # Box half-extents in XY; full dimensions are twice these values.
     OBSTACLE_SIZE_MIN = (0.20, 0.30)
     OBSTACLE_SIZE_MAX = (0.60, 0.60)
     MIN_PASSAGE = 1.0
 
-    def __init__(self, stage="hard"):
-        super().__init__()
-        self.stage = stage
-        spec = mujoco.MjSpec.from_file(str(Path(__file__).with_name("scene.xml")))
-        # Compile conservative collision/raycast bounds covering the arena.
-        # Changing geom_size later does not rebuild MuJoCo's static BVH bounds.
-        for name in ("obstacle_1", "obstacle_2"):
-            spec.geom(name).pos[:2] = (0, 0)
-            spec.geom(name).size[:2] = (3, 3)
-        self.model = spec.compile()
+    def __init__(self, stage="hard", render_mode=None, show_rays=False):
         if stage not in self.STAGES:
             raise ValueError(f"Unsupported stage: {stage}; this scene uses two random obstacles")
+        self.stage = stage
+        self.show_rays = show_rays
+        self.nrays = 9
+        super().__init__(
+            model_path=str(Path(__file__).with_name("scene.xml").resolve()),
+            frame_skip=4,
+            render_mode=render_mode,
+            camera_name="top",
+            width=900,
+            height=900,
+            default_camera_config={
+                "lookat": np.array([0.0, 0.0, 0.0]),
+                "distance": 9.0,
+                "azimuth": 90.0,
+                "elevation": -90.0,
+            },
+            observation_space=spaces.Box(
+                low=0.0, high=1.0, shape=(self.nrays * 3,), dtype=np.float32,
+            ),
+        )
         self.blocks = [self.model.geom(name).id for name in ("obstacle_1", "obstacle_2")]
         self.model.geom_size[self.blocks, :2] = self.OBSTACLE_SIZE_MAX
-        self.data = mujoco.MjData(self.model)
         self.controller = RobotController(self.model, self.data)
         self.robot_id = self.model.body("robot").id
         self.target_id = self.model.geom("target").id
         indicator_id = self.model.body("robot_indicator").id
-        self.nrays = 9
         self.ray_length = 6.0
-        self.frame_skip = 4  # One action lasts 4 * 0.005 = 0.02 simulated seconds.
         self.max_episode_steps = 2000  # 40 simulated seconds.
         self.target_radius = 0.9  # Robot center must enter the green target disk.
         self.spawn_clearance = 0.47
@@ -62,12 +70,45 @@ class RaycastEnv(gym.Env):
         self.elapsed_steps = 0
         self.sensor = Raycaster(self.model, self.data, {self.robot_id: indicator_id})
         self.sensor.setup_raycast(self.robot_id, self.nrays, 120)
-        # Action: [forward (avanzamento), turn (rotazione)], both normalized to [-1, 1].
+    def _set_action_space(self):
+        # Controller commands, rather than direct actuator controls.
         self.action_space = spaces.Box(-1.0, 1.0, shape=(2,), dtype=np.float32)
-        # Per ray: [distance, obstacle, target]; walls count as obstacles.
-        self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(self.nrays * 3,), dtype=np.float32,
-        )
+        return self.action_space
+
+    def _initialize_simulation(self):
+        spec = mujoco.MjSpec.from_file(self.fullpath)
+        # Conservative bounds are needed when obstacle sizes/positions change.
+        for name in ("obstacle_1", "obstacle_2"):
+            spec.geom(name).pos[:2] = (0, 0)
+            spec.geom(name).size[:2] = (3, 3)
+        model = spec.compile()
+        model.vis.global_.offwidth = self.width
+        model.vis.global_.offheight = self.height
+        return model, mujoco.MjData(model)
+
+    def render(self):
+        if self.show_rays and self.render_mode is not None:
+            viewer = self.mujoco_renderer._get_viewer(self.render_mode)
+            geomids, distances = self.sensor.perform_raycast(self.robot_id, self.ray_length)
+            origin = self.sensor.raycast_origins_buf[self.robot_id]
+            directions = self.sensor.raycast_ray_dirs_buf[self.robot_id]
+            for direction, geom_id, distance in zip(directions, geomids, distances):
+                length = distance if geom_id >= 0 else self.ray_length
+                if length <= 0:
+                    continue
+                end = origin + direction * length
+                # Render-only connectors never enter the physics model or sensors.
+                geom = mujoco.MjvGeom()
+                mujoco.mjv_connector(geom, mujoco.mjtGeom.mjGEOM_LINE,
+                                     2.0, origin, end)
+                color = ([0.1, 1.0, 0.2, 1.0] if geom_id == self.target_id
+                         else [1.0, 0.8, 0.0, 1.0])
+                viewer.add_marker(type=mujoco.mjtGeom.mjGEOM_LINE,
+                                  size=geom.size.astype(np.float64),
+                                  pos=geom.pos.astype(np.float64),
+                                  mat=geom.mat.astype(np.float64).reshape(9),
+                                  rgba=np.array(color, dtype=np.float32), label="")
+        return super().render()
 
     def _get_observation(self):
         """Return only ray measurements, flattened in ray order."""
@@ -138,10 +179,8 @@ class RaycastEnv(gym.Env):
                 return
         raise RuntimeError("Could not place obstacles with enough passage clearance")
 
-    def reset(self, *, seed=None, options=None):
-        """Sample robot and target positions and return (observation, info)."""
-        super().reset(seed=seed)
-        mujoco.mj_resetData(self.model, self.data)
+    def reset_model(self):
+        """Sample the scene after MujocoEnv resets simulation data."""
         self._randomize_obstacles()
         robot_position = self._sample_spawn()
         for _ in range(1000):
@@ -155,9 +194,12 @@ class RaycastEnv(gym.Env):
         self.model.geom_pos[self.target_id, :2] = target_position
         mujoco.mj_forward(self.model, self.data)
         self.elapsed_steps = 0
+        return self._get_observation()
+
+    def _get_reset_info(self):
         info = {"target_distance": self._target_distance()}
         info.update(is_success=False, collision=False, termination_reason=None)
-        return self._get_observation(), info
+        return info
 
     def step(self, action):
         """Apply one action and return the five values expected by Gymnasium."""
@@ -195,4 +237,6 @@ class RaycastEnv(gym.Env):
             reason = "timeout"
         info.update(is_success=success, collision=collision, termination_reason=reason,
                     reward_components=components)
+        if self.render_mode == "human":
+            self.render()
         return observation, float(sum(components.values())), terminated, truncated, info

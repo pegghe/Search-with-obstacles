@@ -1,10 +1,7 @@
-"""Evaluate a saved PPO agent, optionally showing its movement and ray sensor."""
+"""Watch a PPO agent with the standard Gymnasium MuJoCo renderer."""
 import argparse
-from contextlib import nullcontext
 from pathlib import Path
-import time
 
-import mujoco
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.utils import check_for_correct_spaces
@@ -27,54 +24,25 @@ def main():
     # Older checkpoints have no stage metadata and used the original hard scene.
     stage = args.stage or getattr(agent, 'curriculum_stage', 'hard')
     print(f'Evaluation stage: {stage}')
-    env = RaycastEnv(stage=stage)
+    env = RaycastEnv(stage=stage, render_mode=None if args.headless else "human",
+                     show_rays=not args.headless)
     try:
         # Prediction works with one simulator even when training used several.
         check_for_correct_spaces(env, agent.observation_space, agent.action_space)
-        env.reset()
-        if args.headless:
-            context = nullcontext(None)
-        else:
-            import mujoco.viewer
-            from view_scene import draw_rays
-            context = mujoco.viewer.launch_passive(env.model, env.data)
         successes = 0
-        with context as viewer:
-            if viewer is not None:
-                with viewer.lock():
-                    viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-                    viewer.cam.fixedcamid = env.model.camera('top').id
-                    viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_JOINT] = False
-            for episode in range(args.episodes):
-                observation, _ = env.reset()
-                total_reward = 0.0
-                while True:
-                    if viewer is not None and not viewer.is_running():
-                        return
-                    frame_start = time.perf_counter()
-                    simulated_start = env.data.time
-                    # The policy chooses both commands; there is no keyboard control.
-                    action, _ = agent.predict(observation, deterministic=True)
-                    observation, reward, terminated, truncated, info = env.step(action)
-                    total_reward += reward
-                    if viewer is not None:
-                        with viewer.lock():
-                            viewer.user_scn.ngeom = 0
-                            draw_rays(viewer.user_scn, env.sensor, env.robot_id,
-                                      env.sensor.raycast_geomids_buf[env.robot_id],
-                                      env.sensor.raycast_distances_buf[env.robot_id],
-                                      ray_length=env.ray_length)
-                        viewer.sync()
-                        # Only visual playback is paced; training runs at full speed.
-                        remaining = env.data.time - simulated_start - (time.perf_counter() - frame_start)
-                        if remaining > 0:
-                            time.sleep(remaining)
-                    if terminated or truncated:
-                        successes += int(info['is_success'])
-                        print(f"Episode {episode + 1}: {info['termination_reason']}, "
-                              f"reward={total_reward:.2f}, distance={info['target_distance']:.3f} m, "
-                              f"time={env.data.time:.2f} s")
-                        break
+        for episode in range(args.episodes):
+            observation, _ = env.reset()
+            total_reward = 0.0
+            while True:
+                action, _ = agent.predict(observation, deterministic=True)
+                observation, reward, terminated, truncated, info = env.step(action)
+                total_reward += reward
+                if terminated or truncated:
+                    successes += int(info['is_success'])
+                    print(f"Episode {episode + 1}: {info['termination_reason']}, "
+                          f"reward={total_reward:.2f}, distance={info['target_distance']:.3f} m, "
+                          f"time={env.data.time:.2f} s")
+                    break
         print(f'Successes: {successes}/{args.episodes} (random spawns each episode).')
     finally:
         env.close()

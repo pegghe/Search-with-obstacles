@@ -367,3 +367,15 @@ Best-model selection uses stochastic training actions and includes successes,
 collisions, and timeouts. TensorBoard logs `rollout/best_selection_mean_reward`,
 `rollout/best_selection_episodes`, and `rollout/best_checkpoint_mean_reward`.
 Each resumed session starts a fresh selection window and record.
+
+### Shared MuJoCo environment
+
+`RaycastEnv` extends `gymnasium.envs.mujoco.MujocoEnv`. Training (`train.py`),
+evaluation (`main.py`, `watch_agent.py`, and `eval_reports/compare_runs_seed42.py`),
+and static preview (`view_scene.py`, seed 42) all use this environment.
+`MujocoEnv` manages simulation initialization, reset, and renderer cleanup.
+The custom controller and per-substep collision checks remain in `RaycastEnv.step`.
+Direct `mujoco` imports remain necessary for ray casting, physics operations, and
+the passive viewer with ray overlays; `MujocoEnv` does not replace those APIs.
+
+`watch_agent.py` uses `render_mode="human"` and the standard Gymnasium MuJoCo renderer, without custom ray overlays. Pass `--headless` to disable rendering. The top camera is selected initially.
