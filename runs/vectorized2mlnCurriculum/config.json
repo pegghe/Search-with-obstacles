@@ -1,0 +1,15 @@
+{
+  "requested_steps": 1000000,
+  "seed": 42,
+  "algorithm": "PPO",
+  "scene": "random robot and target positions",
+  "stage": "hard",
+  "gamma": 0.999,
+  "n_envs": 4,
+  "vec_env": "subproc",
+  "n_steps_per_env": 2048,
+  "rollout_size": 8192,
+  "best_model_metric": "rollout_mean_episode_reward",
+  "best_model_window": 100,
+  "resume": "/home/rl/raycast_update_copy/runs/hard-rays-2obstacles/best_model.zip"
+}

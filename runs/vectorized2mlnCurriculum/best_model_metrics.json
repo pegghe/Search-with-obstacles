@@ -1,0 +1,6 @@
+{
+  "metric": "rollout_mean_episode_reward",
+  "mean_reward": 18.432560909999996,
+  "episodes": 100,
+  "timesteps": 1529040
+}
